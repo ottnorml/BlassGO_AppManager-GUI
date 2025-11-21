@@ -1,0 +1,200 @@
+# Build Workflow for Multi-Platform Desktop Application
+#
+# This workflow builds the Flutter desktop application for all major operating systems:
+# - Linux (x64)
+# - macOS (Universal binary - supports both Intel and Apple Silicon)
+# - Windows (x64)
+#
+# The workflow is triggered on:
+# - Manual dispatch (workflow_dispatch)
+# - Push to main branch
+# - Pull requests to main branch
+#
+# Uses matrix strategy for efficient parallel builds across all platforms.
+
+name: Build Multi-Platform
+
+# Workflow triggers
+on:
+  # Allow manual workflow triggering from GitHub UI
+  workflow_dispatch:
+  
+  # Trigger on push to main branch
+  push:
+    branches: [ "main" ]
+  
+  # Trigger on pull requests targeting main branch
+  pull_request:
+    branches: [ "main" ]
+
+# Define permissions for the workflow
+permissions:
+  contents: read
+  id-token: write  # Required for build attestation
+  attestations: write  # Required for build attestation
+
+jobs:
+  # Job 0: Run tests first on pull requests
+  test:
+    name: Run Tests
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    
+    steps:
+      # Step 1: Check out the repository code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      # Step 2: Set up Flutter SDK
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+      
+      # Step 3: Cache pub dependencies
+      - name: Cache pub dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache
+            .dart_tool
+          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-
+      
+      # Step 4: Install project dependencies
+      - name: Install dependencies
+        run: flutter pub get
+      
+      # Step 5: Run static code analysis
+      - name: Analyze code
+        run: flutter analyze --fatal-infos --fatal-warnings
+      
+      # Step 6: Run all tests
+      - name: Run tests
+        run: flutter test
+  
+  # Job 1: Build for all platforms using matrix strategy
+  build:
+    name: Build ${{ matrix.platform }} (${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    # Only run after tests pass on PRs, or immediately on other events
+    needs: [test]
+    if: |
+      always() &&
+      (needs.test.result == 'success' || needs.test.result == 'skipped')
+    
+    strategy:
+      # Don't cancel other matrix jobs if one fails
+      fail-fast: false
+      matrix:
+        include:
+          # Linux build configuration
+          - platform: Linux
+            os: ubuntu-latest
+            arch: x64
+            build-command: flutter build linux --release
+            artifact-name: app_manager_linux_x64.tar.gz
+            package-command: |
+              cd build/linux/x64/release/bundle
+              tar -czf ../../../../../app_manager_linux_x64.tar.gz .
+            cache-path: |
+              ~/.pub-cache
+              .dart_tool
+            desktop-flag: linux
+          
+          # macOS build configuration
+          - platform: macOS
+            os: macos-latest
+            arch: Universal
+            build-command: flutter build macos --release
+            artifact-name: app_manager_macos.zip
+            package-command: |
+              cd build/macos/Build/Products/Release
+              zip -r ../../../../../app_manager_macos.zip app_manager.app
+            cache-path: |
+              ~/.pub-cache
+              .dart_tool
+            desktop-flag: macos
+          
+          # Windows build configuration
+          - platform: Windows
+            os: windows-latest
+            arch: x64
+            build-command: flutter build windows --release
+            artifact-name: app_manager_windows_x64.zip
+            package-command: |
+              cd build\windows\x64\runner\Release
+              Compress-Archive -Path * -DestinationPath ..\..\..\..\..\app_manager_windows_x64.zip
+            package-shell: pwsh
+            cache-path: |
+              ~\AppData\Local\Pub\Cache
+              .dart_tool
+            desktop-flag: windows
+    
+    steps:
+      # Step 1: Check out the repository
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      # Step 2: Install platform-specific dependencies (Linux only)
+      - name: Install Linux dependencies
+        if: matrix.platform == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang \
+            cmake \
+            ninja-build \
+            pkg-config \
+            libgtk-3-dev \
+            liblzma-dev \
+            libstdc++-12-dev
+      
+      # Step 3: Set up Flutter SDK with caching
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+      
+      # Step 4: Cache pub dependencies per platform
+      - name: Cache pub dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ matrix.cache-path }}
+          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-
+      
+      # Step 5: Enable desktop support for the platform
+      - name: Enable ${{ matrix.platform }} desktop
+        run: flutter config --enable-${{ matrix.desktop-flag }}-desktop
+      
+      # Step 6: Install project dependencies
+      - name: Install dependencies
+        run: flutter pub get
+      
+      # Step 7: Build for the platform
+      - name: Build ${{ matrix.platform }} app
+        run: ${{ matrix.build-command }}
+      
+      # Step 8: Package the build
+      - name: Package ${{ matrix.platform }} build
+        run: ${{ matrix.package-command }}
+        shell: ${{ matrix.package-shell || 'bash' }}
+      
+      # Step 9: Generate build attestation for security
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: ${{ matrix.artifact-name }}
+      
+      # Step 10: Upload build artifact
+      - name: Upload ${{ matrix.platform }} artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform == 'Linux' && 'linux-build' || matrix.platform == 'macOS' && 'macos-build' || 'windows-build' }}
+          path: ${{ matrix.artifact-name }}
+          retention-days: 7

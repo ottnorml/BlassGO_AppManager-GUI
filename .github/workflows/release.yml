@@ -1,0 +1,241 @@
+# Release Workflow for Automated Multi-Platform Releases
+#
+# This workflow automatically creates GitHub releases with pre-built binaries
+# for all supported platforms when a new version tag is pushed.
+#
+# Trigger: Push of tags matching the pattern 'v*.*.*' (e.g., v1.2.5, v2.0.0)
+#
+# The workflow performs the following steps:
+# 1. Triggers the build workflow to create artifacts
+# 2. Waits for the build workflow to complete
+# 3. Downloads the build artifacts
+# 4. Creates a GitHub release with the tag
+# 5. Uploads all platform binaries as release assets
+#
+# This approach reuses the build workflow, avoiding duplication and ensuring
+# consistency between regular builds and release builds.
+#
+# Usage:
+#   To create a new release, push a tag:
+#   git tag v1.2.6
+#   git push origin v1.2.6
+#
+# Note: For macOS releases with code signing, update the build workflow
+# with the necessary code signing steps.
+
+name: Release
+
+# Trigger on version tags (e.g., v1.2.5, v2.0.0)
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+# Define permissions for creating releases and accessing workflow runs
+permissions:
+  contents: write
+  actions: read  # Required to trigger and read workflow runs
+
+jobs:
+  # Job 1: Trigger the build workflow and wait for completion
+  trigger-build:
+    name: Trigger Build Workflow
+    runs-on: ubuntu-latest
+    outputs:
+      run-id: ${{ steps.wait-for-build.outputs.run-id }}
+    
+    steps:
+      # Step 1: Trigger the build workflow
+      - name: Trigger build workflow
+        id: trigger
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Trigger the build workflow for this tag
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'build.yml',
+              ref: context.ref
+            });
+            
+            console.log('Build workflow triggered successfully');
+      
+      # Step 2: Wait for the workflow to start and get its run ID
+      - name: Wait for build workflow to start
+        id: wait-for-build
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Wait a moment for the workflow to be created
+            await new Promise(resolve => setTimeout(resolve, 5000));
+            
+            // Get the most recent workflow run for build.yml
+            const runs = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'build.yml',
+              event: 'workflow_dispatch',
+              per_page: 5
+            });
+            
+            // Find the run that matches our ref
+            const buildRun = runs.data.workflow_runs.find(run => 
+              run.head_sha === context.sha || 
+              run.created_at > new Date(Date.now() - 60000).toISOString()
+            );
+            
+            if (!buildRun) {
+              core.setFailed('Could not find the triggered build workflow run');
+              return;
+            }
+            
+            const runId = buildRun.id;
+            core.setOutput('run-id', runId);
+            console.log(`Build workflow run ID: ${runId}`);
+            
+            // Wait for the workflow to complete
+            let status = buildRun.status;
+            let conclusion = buildRun.conclusion;
+            
+            while (status !== 'completed') {
+              await new Promise(resolve => setTimeout(resolve, 30000)); // Wait 30 seconds
+              
+              const run = await github.rest.actions.getWorkflowRun({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: runId
+              });
+              
+              status = run.data.status;
+              conclusion = run.data.conclusion;
+              
+              console.log(`Build workflow status: ${status}, conclusion: ${conclusion}`);
+              
+              if (status === 'completed' && conclusion !== 'success') {
+                core.setFailed(`Build workflow failed with conclusion: ${conclusion}`);
+                return;
+              }
+            }
+            
+            console.log('Build workflow completed successfully');
+  
+  # Job 2: Create GitHub Release using build artifacts
+  create-release:
+    name: Create GitHub Release
+    needs: [trigger-build]
+    runs-on: ubuntu-latest
+    
+    steps:
+      # Step 1: Check out the repository (needed for release notes)
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      # Step 2: Download artifacts from the build workflow run
+      - name: Download build artifacts
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const runId = ${{ needs.trigger-build.outputs.run-id }};
+            
+            // Get all artifacts from the build workflow run
+            const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: runId
+            });
+            
+            console.log(`Found ${artifacts.data.artifacts.length} artifacts`);
+            
+            // Download each artifact
+            for (const artifact of artifacts.data.artifacts) {
+              console.log(`Downloading artifact: ${artifact.name}`);
+              
+              const download = await github.rest.actions.downloadArtifact({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                artifact_id: artifact.id,
+                archive_format: 'zip'
+              });
+              
+              // Save the artifact
+              fs.writeFileSync(`${artifact.name}.zip`, Buffer.from(download.data));
+              console.log(`Downloaded: ${artifact.name}.zip`);
+            }
+      
+      # Step 3: Extract artifacts
+      - name: Extract artifacts
+        run: |
+          for file in *.zip; do
+            if [ -f "$file" ]; then
+              echo "Extracting $file"
+              unzip -o "$file"
+              rm "$file"
+            fi
+          done
+          ls -la
+      
+      # Step 4: Create release notes
+      - name: Generate release notes
+        id: release-notes
+        run: |
+          # Extract version from tag (remove 'v' prefix)
+          VERSION=${GITHUB_REF#refs/tags/v}
+          
+          # Create release notes
+          cat > release-notes.md << EOF
+          # App Manager GUI v${VERSION}
+          
+          ## Downloads
+          
+          Choose the appropriate version for your operating system:
+          
+          - **Linux (x64)**: \`app_manager_linux_x64.tar.gz\`
+          - **macOS (Universal)**: \`app_manager_macos.zip\` (supports both Intel and Apple Silicon)
+          - **Windows (x64)**: \`app_manager_windows_x64.zip\`
+          
+          ## Installation Instructions
+          
+          ### Linux
+          1. Download \`app_manager_linux_x64.tar.gz\`
+          2. Extract: \`tar -xzf app_manager_linux_x64.tar.gz -C ~/AppManager\`
+          3. Run: \`cd ~/AppManager && ./app_manager\`
+          
+          ### macOS
+          1. Download \`app_manager_macos.zip\`
+          2. Extract the zip file
+          3. Move \`app_manager.app\` to your Applications folder
+          4. Right-click and select "Open" on first launch (required for unsigned apps)
+          
+          ### Windows
+          1. Download \`app_manager_windows_x64.zip\`
+          2. Extract to a folder (e.g., \`C:\AppManager\`)
+          3. Run \`app_manager.exe\`
+          
+          ## Requirements
+          
+          - [ADB (Android Debug Bridge)](https://developer.android.com/tools/releases/platform-tools)
+          - Android device with USB debugging enabled
+          
+          ## What's Changed
+          
+          See the full changelog below for details on this release.
+          EOF
+          
+          # Output the file content for the release
+          cat release-notes.md
+      
+      # Step 5: Create GitHub Release with all artifacts
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release-notes.md
+          files: |
+            app_manager_linux_x64.tar.gz
+            app_manager_macos.zip
+            app_manager_windows_x64.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
