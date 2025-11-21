@@ -119,10 +119,17 @@ To enable code signing for macOS builds, you need to:
 **Commands to prepare secrets:**
 
 ```bash
-# Encode certificate to base64
-base64 -i Certificates.p12 | pbcopy
+# macOS/Linux: Encode certificate to base64
+base64 Certificates.p12 > certificate.txt
+# Or copy directly (macOS): base64 Certificates.p12 | pbcopy
 
-# Add to GitHub:
+# Linux (alternative - no line wrapping): 
+base64 -w 0 Certificates.p12 > certificate.txt
+
+# Windows (PowerShell): Encode certificate to base64
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("Certificates.p12")) | Out-File certificate.txt
+
+# Copy the content of certificate.txt and add to GitHub:
 # Settings > Secrets and variables > Actions > New repository secret
 ```
 
@@ -244,11 +251,11 @@ This is useful for:
 
 ### Status Badges
 
-Add status badges to the main README:
+Add status badges to the main README (replace `OWNER/REPO` with your repository path):
 
 ```markdown
-![Test and Analyze](https://github.com/ottnorml/BlassGO_AppManager-GUI/workflows/Test%20and%20Analyze/badge.svg)
-![Build Multi-Platform](https://github.com/ottnorml/BlassGO_AppManager-GUI/workflows/Build%20Multi-Platform/badge.svg)
+![Test and Analyze](https://github.com/OWNER/REPO/workflows/Test%20and%20Analyze/badge.svg)
+![Build Multi-Platform](https://github.com/OWNER/REPO/workflows/Build%20Multi-Platform/badge.svg)
 ```
 
 ### Notifications

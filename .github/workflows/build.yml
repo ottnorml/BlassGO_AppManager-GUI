@@ -106,7 +106,6 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
-          flutter-version: '3.24.0'
           cache: true
       
       # Step 3: Enable macOS desktop support
@@ -146,14 +145,6 @@ jobs:
       # Step 1: Check out the repository
       - name: Checkout repository
         uses: actions/checkout@v4
-      
-      # Step 2: Set up Flutter SDK
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: 'stable'
-          flutter-version: '3.24.0'
-          cache: true
       
       # Step 2: Set up Flutter SDK
       - name: Set up Flutter
