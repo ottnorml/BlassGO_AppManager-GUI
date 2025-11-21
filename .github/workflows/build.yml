@@ -62,7 +62,6 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
-          flutter-version: '3.24.0'
           cache: true
       
       # Step 4: Enable Linux desktop support
@@ -154,6 +153,13 @@ jobs:
         with:
           channel: 'stable'
           flutter-version: '3.24.0'
+          cache: true
+      
+      # Step 2: Set up Flutter SDK
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
           cache: true
       
       # Step 3: Enable Windows desktop support

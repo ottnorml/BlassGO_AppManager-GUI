@@ -142,11 +142,14 @@ base64 -i Certificates.p12 | pbcopy
 
 ### Flutter Version
 
-All workflows use Flutter 3.24.0 (stable channel). To update:
+All workflows use the latest stable version of Flutter. The workflows automatically use the newest stable release to ensure compatibility with the latest Dart SDK requirements.
 
-1. Edit the `flutter-version` in each workflow file
-2. Test the build locally first
-3. Update all three workflows consistently
+To pin to a specific Flutter version (if needed):
+
+1. Edit each workflow file
+2. Add `flutter-version: 'X.Y.Z'` under the `with:` section of `subosito/flutter-action@v2`
+3. Test the build locally first
+4. Update all three workflows consistently
 
 ### Caching
 
