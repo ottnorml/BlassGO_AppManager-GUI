@@ -6,9 +6,10 @@
 # Trigger: Push of tags matching the pattern 'v*.*.*' (e.g., v1.2.5, v2.0.0)
 #
 # The workflow performs the following steps:
-# 1. Builds the application for Linux, macOS, and Windows
-# 2. Creates a GitHub release with the tag
-# 3. Uploads all platform binaries as release assets
+# 1. Builds the application for Linux, macOS, and Windows with caching
+# 2. Generates build attestations for security
+# 3. Creates a GitHub release with the tag
+# 4. Uploads all platform binaries as release assets
 #
 # Usage:
 #   To create a new release, push a tag:
@@ -18,7 +19,7 @@
 # Note: For macOS releases with code signing, you would need to:
 # - Add APPLE_CERTIFICATE and APPLE_CERTIFICATE_PASSWORD secrets
 # - Add APPLE_TEAM_ID secret
-# - Uncomment the code signing steps in the macOS build job
+# - Update the macOS build job with code signing steps
 
 name: Release
 
@@ -31,6 +32,8 @@ on:
 # Define permissions for creating releases and uploading assets
 permissions:
   contents: write
+  id-token: write  # Required for build attestation
+  attestations: write  # Required for build attestation
 
 jobs:
   # Job 1: Build for Linux
@@ -63,25 +66,42 @@ jobs:
           channel: 'stable'
           cache: true
       
-      # Step 4: Enable Linux desktop support
+      # Step 4: Cache pub dependencies
+      - name: Cache pub dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache
+            .dart_tool
+          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-
+      
+      # Step 5: Enable Linux desktop support
       - name: Enable Linux desktop
         run: flutter config --enable-linux-desktop
       
-      # Step 5: Install dependencies
+      # Step 6: Install dependencies
       - name: Install dependencies
         run: flutter pub get
       
-      # Step 6: Build Linux release
+      # Step 7: Build Linux release
       - name: Build Linux app
         run: flutter build linux --release
       
-      # Step 7: Package the Linux build
+      # Step 8: Package the Linux build
       - name: Package Linux build
         run: |
           cd build/linux/x64/release/bundle
           tar -czf ../../../../../app_manager_linux_x64.tar.gz .
       
-      # Step 8: Upload Linux build artifact for release
+      # Step 9: Generate build attestation
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: app_manager_linux_x64.tar.gz
+      
+      # Step 10: Upload Linux build artifact for release
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:
@@ -106,11 +126,22 @@ jobs:
           channel: 'stable'
           cache: true
       
-      # Step 3: Enable macOS desktop support
+      # Step 3: Cache pub dependencies
+      - name: Cache pub dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache
+            .dart_tool
+          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-
+      
+      # Step 4: Enable macOS desktop support
       - name: Enable macOS desktop
         run: flutter config --enable-macos-desktop
       
-      # Step 4: Install dependencies
+      # Step 5: Install dependencies
       - name: Install dependencies
         run: flutter pub get
       
@@ -149,17 +180,23 @@ jobs:
       #     flutter build macos --release \
       #       --dart-define=APPLE_TEAM_ID=$APPLE_TEAM_ID
       
-      # Step 5: Build macOS release (unsigned for now)
+      # Step 6: Build macOS release (unsigned for now)
       - name: Build macOS app
         run: flutter build macos --release
       
-      # Step 6: Package the macOS build
+      # Step 7: Package the macOS build
       - name: Package macOS build
         run: |
           cd build/macos/Build/Products/Release
           zip -r ../../../../../app_manager_macos.zip app_manager.app
       
-      # Step 7: Upload macOS build artifact for release
+      # Step 8: Generate build attestation
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: app_manager_macos.zip
+      
+      # Step 9: Upload macOS build artifact for release
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
@@ -184,26 +221,43 @@ jobs:
           channel: 'stable'
           cache: true
       
-      # Step 3: Enable Windows desktop support
+      # Step 3: Cache pub dependencies
+      - name: Cache pub dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~\AppData\Local\Pub\Cache
+            .dart_tool
+          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-
+      
+      # Step 4: Enable Windows desktop support
       - name: Enable Windows desktop
         run: flutter config --enable-windows-desktop
       
-      # Step 4: Install dependencies
+      # Step 5: Install dependencies
       - name: Install dependencies
         run: flutter pub get
       
-      # Step 5: Build Windows release
+      # Step 6: Build Windows release
       - name: Build Windows app
         run: flutter build windows --release
       
-      # Step 6: Package the Windows build
+      # Step 7: Package the Windows build
       - name: Package Windows build
         run: |
           cd build\windows\x64\runner\Release
           Compress-Archive -Path * -DestinationPath ..\..\..\..\..\app_manager_windows_x64.zip
         shell: pwsh
       
-      # Step 7: Upload Windows build artifact for release
+      # Step 8: Generate build attestation
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: app_manager_windows_x64.zip
+      
+      # Step 9: Upload Windows build artifact for release
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:

@@ -40,24 +40,36 @@ jobs:
           channel: 'stable'
           cache: true
       
-      # Step 3: Display Flutter version for debugging
+      # Step 3: Cache pub dependencies
+      # Speeds up workflow by caching downloaded packages
+      - name: Cache pub dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache
+            .dart_tool
+          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-
+      
+      # Step 4: Display Flutter version for debugging
       - name: Display Flutter version
         run: flutter --version
       
-      # Step 4: Install project dependencies
+      # Step 5: Install project dependencies
       - name: Install dependencies
         run: flutter pub get
       
-      # Step 5: Verify dependencies are correctly installed
+      # Step 6: Verify dependencies are correctly installed
       - name: Verify dependencies
         run: flutter pub deps
       
-      # Step 6: Run static code analysis
+      # Step 7: Run static code analysis
       # This checks for potential issues, style violations, and best practice violations
       - name: Analyze code
         run: flutter analyze --fatal-infos --fatal-warnings
       
-      # Step 7: Run all tests
+      # Step 8: Run all tests
       # This executes the test suite to ensure functionality is working as expected
       - name: Run tests
         run: flutter test
