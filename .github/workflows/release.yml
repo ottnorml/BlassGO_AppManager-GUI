@@ -1,0 +1,307 @@
+# Release Workflow for Automated Multi-Platform Releases
+#
+# This workflow automatically creates GitHub releases with pre-built binaries
+# for all supported platforms when a new version tag is pushed.
+#
+# Trigger: Push of tags matching the pattern 'v*.*.*' (e.g., v1.2.5, v2.0.0)
+#
+# The workflow performs the following steps:
+# 1. Builds the application for Linux, macOS, and Windows
+# 2. Creates a GitHub release with the tag
+# 3. Uploads all platform binaries as release assets
+#
+# Usage:
+#   To create a new release, push a tag:
+#   git tag v1.2.6
+#   git push origin v1.2.6
+#
+# Note: For macOS releases with code signing, you would need to:
+# - Add APPLE_CERTIFICATE and APPLE_CERTIFICATE_PASSWORD secrets
+# - Add APPLE_TEAM_ID secret
+# - Uncomment the code signing steps in the macOS build job
+
+name: Release
+
+# Trigger on version tags (e.g., v1.2.5, v2.0.0)
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+# Define permissions for creating releases and uploading assets
+permissions:
+  contents: write
+
+jobs:
+  # Job 1: Build for Linux
+  build-linux:
+    name: Build Linux (x64)
+    runs-on: ubuntu-latest
+    
+    steps:
+      # Step 1: Check out the repository
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      # Step 2: Install Linux build dependencies
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang \
+            cmake \
+            ninja-build \
+            pkg-config \
+            libgtk-3-dev \
+            liblzma-dev \
+            libstdc++-12-dev
+      
+      # Step 3: Set up Flutter SDK
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          flutter-version: '3.24.0'
+          cache: true
+      
+      # Step 4: Enable Linux desktop support
+      - name: Enable Linux desktop
+        run: flutter config --enable-linux-desktop
+      
+      # Step 5: Install dependencies
+      - name: Install dependencies
+        run: flutter pub get
+      
+      # Step 6: Build Linux release
+      - name: Build Linux app
+        run: flutter build linux --release
+      
+      # Step 7: Package the Linux build
+      - name: Package Linux build
+        run: |
+          cd build/linux/x64/release/bundle
+          tar -czf ../../../../../app_manager_linux_x64.tar.gz .
+      
+      # Step 8: Upload Linux build artifact for release
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-release
+          path: app_manager_linux_x64.tar.gz
+          retention-days: 1
+  
+  # Job 2: Build for macOS
+  build-macos:
+    name: Build macOS (Universal)
+    runs-on: macos-latest
+    
+    steps:
+      # Step 1: Check out the repository
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      # Step 2: Set up Flutter SDK
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          flutter-version: '3.24.0'
+          cache: true
+      
+      # Step 3: Enable macOS desktop support
+      - name: Enable macOS desktop
+        run: flutter config --enable-macos-desktop
+      
+      # Step 4: Install dependencies
+      - name: Install dependencies
+        run: flutter pub get
+      
+      # Optional: Code signing for macOS (requires secrets to be set)
+      # Uncomment and configure these steps when you have Apple Developer certificates
+      #
+      # - name: Import Apple Code Signing Certificate
+      #   env:
+      #     APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      #     APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      #   run: |
+      #     # Create variables
+      #     CERTIFICATE_PATH=$RUNNER_TEMP/build_certificate.p12
+      #     KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+      #     KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+      #     
+      #     # Import certificate from secrets
+      #     echo -n "$APPLE_CERTIFICATE" | base64 --decode -o $CERTIFICATE_PATH
+      #     
+      #     # Create temporary keychain
+      #     security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+      #     security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+      #     security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+      #     
+      #     # Import certificate to keychain
+      #     security import $CERTIFICATE_PATH -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+      #     security list-keychain -d user -s $KEYCHAIN_PATH
+      #     
+      #     # Clean up
+      #     rm $CERTIFICATE_PATH
+      #
+      # - name: Build and Sign macOS app
+      #   env:
+      #     APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      #   run: |
+      #     flutter build macos --release \
+      #       --dart-define=APPLE_TEAM_ID=$APPLE_TEAM_ID
+      
+      # Step 5: Build macOS release (unsigned for now)
+      - name: Build macOS app
+        run: flutter build macos --release
+      
+      # Step 6: Package the macOS build
+      - name: Package macOS build
+        run: |
+          cd build/macos/Build/Products/Release
+          zip -r ../../../../../app_manager_macos.zip app_manager.app
+      
+      # Step 7: Upload macOS build artifact for release
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-release
+          path: app_manager_macos.zip
+          retention-days: 1
+  
+  # Job 3: Build for Windows
+  build-windows:
+    name: Build Windows (x64)
+    runs-on: windows-latest
+    
+    steps:
+      # Step 1: Check out the repository
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      # Step 2: Set up Flutter SDK
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          flutter-version: '3.24.0'
+          cache: true
+      
+      # Step 3: Enable Windows desktop support
+      - name: Enable Windows desktop
+        run: flutter config --enable-windows-desktop
+      
+      # Step 4: Install dependencies
+      - name: Install dependencies
+        run: flutter pub get
+      
+      # Step 5: Build Windows release
+      - name: Build Windows app
+        run: flutter build windows --release
+      
+      # Step 6: Package the Windows build
+      - name: Package Windows build
+        run: |
+          cd build\windows\x64\runner\Release
+          Compress-Archive -Path * -DestinationPath ..\..\..\..\..\app_manager_windows_x64.zip
+        shell: pwsh
+      
+      # Step 7: Upload Windows build artifact for release
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: app_manager_windows_x64.zip
+          retention-days: 1
+  
+  # Job 4: Create GitHub Release
+  # This job runs after all builds complete and creates the release with all assets
+  create-release:
+    name: Create GitHub Release
+    needs: [build-linux, build-macos, build-windows]
+    runs-on: ubuntu-latest
+    
+    steps:
+      # Step 1: Check out the repository (needed for release notes)
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      # Step 2: Download all build artifacts
+      - name: Download Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-release
+      
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-release
+      
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-release
+      
+      # Step 3: Create release notes
+      - name: Generate release notes
+        id: release-notes
+        run: |
+          # Extract version from tag (remove 'v' prefix)
+          VERSION=${GITHUB_REF#refs/tags/v}
+          
+          # Create release notes
+          cat > release-notes.md << EOF
+          # App Manager GUI v${VERSION}
+          
+          ## Downloads
+          
+          Choose the appropriate version for your operating system:
+          
+          - **Linux (x64)**: \`app_manager_linux_x64.tar.gz\`
+          - **macOS (Universal)**: \`app_manager_macos.zip\` (supports both Intel and Apple Silicon)
+          - **Windows (x64)**: \`app_manager_windows_x64.zip\`
+          
+          ## Installation Instructions
+          
+          ### Linux
+          1. Download \`app_manager_linux_x64.tar.gz\`
+          2. Extract: \`tar -xzf app_manager_linux_x64.tar.gz -C ~/AppManager\`
+          3. Run: \`cd ~/AppManager && ./app_manager\`
+          
+          ### macOS
+          1. Download \`app_manager_macos.zip\`
+          2. Extract the zip file
+          3. Move \`app_manager.app\` to your Applications folder
+          4. Right-click and select "Open" on first launch (required for unsigned apps)
+          
+          ### Windows
+          1. Download \`app_manager_windows_x64.zip\`
+          2. Extract to a folder (e.g., \`C:\AppManager\`)
+          3. Run \`app_manager.exe\`
+          
+          ## Requirements
+          
+          - [ADB (Android Debug Bridge)](https://developer.android.com/tools/releases/platform-tools)
+          - Android device with USB debugging enabled
+          
+          ## What's Changed
+          
+          See the full changelog below for details on this release.
+          EOF
+          
+          # Output the file content for the release
+          cat release-notes.md
+      
+      # Step 4: Create GitHub Release with all artifacts
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release-notes.md
+          files: |
+            app_manager_linux_x64.tar.gz
+            app_manager_macos.zip
+            app_manager_windows_x64.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,64 @@
+# CI Workflow for Testing and Code Analysis
+# 
+# This workflow runs on every push and pull request to ensure code quality.
+# It performs the following steps:
+# 1. Sets up the Flutter environment
+# 2. Installs project dependencies
+# 3. Runs Flutter analyze to check for code issues
+# 4. Runs Flutter tests to validate functionality
+#
+# The workflow helps maintain code quality and catch issues early in the development process.
+
+name: Test and Analyze
+
+# Trigger this workflow on push to any branch and on pull requests
+on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+    branches: [ "**" ]
+
+# Define permissions for the workflow
+permissions:
+  contents: read
+
+jobs:
+  analyze-and-test:
+    name: Analyze and Test
+    runs-on: ubuntu-latest
+    
+    steps:
+      # Step 1: Check out the repository code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      # Step 2: Set up Flutter SDK
+      # Uses the stable channel and enables caching for faster subsequent runs
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          flutter-version: '3.24.0'
+          cache: true
+      
+      # Step 3: Display Flutter version for debugging
+      - name: Display Flutter version
+        run: flutter --version
+      
+      # Step 4: Install project dependencies
+      - name: Install dependencies
+        run: flutter pub get
+      
+      # Step 5: Verify dependencies are correctly installed
+      - name: Verify dependencies
+        run: flutter pub deps
+      
+      # Step 6: Run static code analysis
+      # This checks for potential issues, style violations, and best practice violations
+      - name: Analyze code
+        run: flutter analyze --fatal-infos --fatal-warnings
+      
+      # Step 7: Run all tests
+      # This executes the test suite to ensure functionality is working as expected
+      - name: Run tests
+        run: flutter test
