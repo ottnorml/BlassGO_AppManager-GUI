@@ -35,15 +35,23 @@ This directory contains GitHub Actions workflows for automated testing, building
 
 **Purpose:** Builds the application for all supported platforms to verify build integrity
 
+**Strategy:** Uses GitHub Actions matrix strategy for efficient parallel builds
+
 **Platforms:**
 - **Linux (x64)**: Builds using Ubuntu with GTK3 dependencies
 - **macOS (Universal)**: Builds universal binary supporting both Intel and Apple Silicon
 - **Windows (x64)**: Builds using Windows with Visual Studio build tools
 
+**Matrix Configuration:**
+- All platforms build in parallel
+- `fail-fast: false` ensures all platforms build even if one fails
+- Platform-specific configurations defined in matrix include
+
 **Optimizations:**
 - Pub dependency caching per platform
 - On pull requests, builds only run after tests pass
 - Build provenance attestation for security
+- Parallel execution across all platforms
 
 **Artifacts:**
 - Build artifacts are uploaded and retained for 7 days
@@ -63,8 +71,10 @@ This directory contains GitHub Actions workflows for automated testing, building
 
 **Purpose:** Automatically creates GitHub releases with pre-built binaries for all platforms
 
+**Strategy:** Uses GitHub Actions matrix strategy for efficient parallel builds
+
 **Process:**
-1. Builds application for all three platforms (Linux, macOS, Windows) with caching
+1. Builds application for all three platforms (Linux, macOS, Windows) in parallel using matrix
 2. Generates build provenance attestation for each artifact
 3. Packages each build into appropriate archive formats
 4. Creates a GitHub release with the tag
@@ -264,6 +274,51 @@ jobs:
 - Faster feedback on test failures
 - Builds only run after code quality checks pass
 
+### Matrix Strategy
+
+Both build and release workflows use GitHub Actions matrix strategy for efficient parallel builds:
+
+```yaml
+strategy:
+  fail-fast: false
+  matrix:
+    include:
+      - platform: Linux
+        os: ubuntu-latest
+        arch: x64
+        desktop-flag: linux
+        # ... platform-specific configuration
+      
+      - platform: macOS
+        os: macos-latest
+        arch: Universal
+        desktop-flag: macos
+        # ... platform-specific configuration
+      
+      - platform: Windows
+        os: windows-latest
+        arch: x64
+        desktop-flag: windows
+        # ... platform-specific configuration
+```
+
+**Benefits:**
+- **Parallel execution**: All platforms build simultaneously
+- **DRY principle**: Single job definition for all platforms
+- **Fail-safe**: `fail-fast: false` ensures all platforms build even if one fails
+- **Maintainability**: Platform configurations defined in one place
+- **Extensibility**: Easy to add new platforms or architectures
+
+**Matrix Variables:**
+- `platform`: Display name (Linux, macOS, Windows)
+- `os`: GitHub runner OS (ubuntu-latest, macos-latest, windows-latest)
+- `arch`: Architecture (x64, Universal)
+- `build-command`: Platform-specific build command
+- `artifact-name`: Output artifact filename
+- `package-command`: Platform-specific packaging command
+- `cache-path`: Platform-specific cache paths
+- `desktop-flag`: Flutter desktop flag (linux, macos, windows)
+
 ### Artifact Retention
 
 - **Build workflow**: 7 days
@@ -386,6 +441,8 @@ Potential improvements to consider:
 - Conditional builds on PRs (only after tests pass)
 - Build provenance attestation for supply chain security
 - Multi-layer caching (SDK + dependencies)
+- **Matrix strategy for parallel platform builds**
+- `fail-fast: false` to ensure all platforms build
 
 ---
 
