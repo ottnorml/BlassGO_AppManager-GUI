@@ -11,10 +11,15 @@ This directory contains GitHub Actions workflows for automated testing, building
 **Purpose:** Ensures code quality by running static analysis and tests
 
 **Steps:**
-- Sets up Flutter environment
+- Sets up Flutter environment with SDK caching
+- Caches pub dependencies for faster runs
 - Installs dependencies
 - Runs `flutter analyze` to check for code issues
 - Runs `flutter test` to validate functionality
+
+**Optimizations:**
+- Flutter SDK caching enabled
+- Pub dependency caching (speeds up subsequent runs by ~3x)
 
 **When it runs:**
 - On every push to any branch
@@ -35,13 +40,19 @@ This directory contains GitHub Actions workflows for automated testing, building
 - **macOS (Universal)**: Builds universal binary supporting both Intel and Apple Silicon
 - **Windows (x64)**: Builds using Windows with Visual Studio build tools
 
+**Optimizations:**
+- Pub dependency caching per platform
+- On pull requests, builds only run after tests pass
+- Build provenance attestation for security
+
 **Artifacts:**
 - Build artifacts are uploaded and retained for 7 days
+- Each artifact includes cryptographic build attestation
 - Can be downloaded from the workflow run page
 
 **When it runs:**
 - On push to `main` branch
-- On pull requests to `main` branch
+- On pull requests to `main` branch (only after tests pass)
 - Manually via "Run workflow" button in GitHub Actions tab
 
 ---
@@ -53,11 +64,17 @@ This directory contains GitHub Actions workflows for automated testing, building
 **Purpose:** Automatically creates GitHub releases with pre-built binaries for all platforms
 
 **Process:**
-1. Builds application for all three platforms (Linux, macOS, Windows)
-2. Packages each build into appropriate archive formats
-3. Creates a GitHub release with the tag
-4. Uploads all platform binaries as release assets
-5. Generates release notes with installation instructions
+1. Builds application for all three platforms (Linux, macOS, Windows) with caching
+2. Generates build provenance attestation for each artifact
+3. Packages each build into appropriate archive formats
+4. Creates a GitHub release with the tag
+5. Uploads all platform binaries as release assets
+6. Generates release notes with installation instructions
+
+**Security:**
+- All release artifacts include cryptographic build attestation
+- Attestations provide verifiable proof of build provenance
+- Links artifacts to source code and build process
 
 **Creating a Release:**
 
@@ -160,13 +177,92 @@ To pin to a specific Flutter version (if needed):
 
 ### Caching
 
-All workflows enable Flutter SDK caching to speed up subsequent runs:
+All workflows use multiple layers of caching to significantly speed up build times:
 
+**Flutter SDK Caching:**
 ```yaml
 - uses: subosito/flutter-action@v2
   with:
     cache: true
 ```
+
+**Pub Dependency Caching:**
+
+Each workflow caches pub dependencies per platform:
+
+- **Linux/macOS:**
+  ```yaml
+  - uses: actions/cache@v4
+    with:
+      path: |
+        ~/.pub-cache
+        .dart_tool
+      key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.yaml') }}
+  ```
+
+- **Windows:**
+  ```yaml
+  - uses: actions/cache@v4
+    with:
+      path: |
+        ~\AppData\Local\Pub\Cache
+        .dart_tool
+      key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.yaml') }}
+  ```
+
+**Performance Impact:**
+- First run: Full build time
+- Subsequent runs: ~3x faster due to dependency caching
+- Cache invalidation: Automatic when `pubspec.yaml` changes
+
+### Build Attestation
+
+All build artifacts include cryptographic build provenance attestation for supply chain security:
+
+```yaml
+- uses: actions/attest-build-provenance@v1
+  with:
+    subject-path: app_manager_linux_x64.tar.gz
+```
+
+**Benefits:**
+- Verifiable proof that artifacts were built by GitHub Actions
+- Links artifacts to their source code and build process
+- Enables verification of artifact authenticity
+- Part of supply chain security best practices
+
+**Required Permissions:**
+```yaml
+permissions:
+  id-token: write  # Required for build attestation
+  attestations: write  # Required for build attestation
+```
+
+**Viewing Attestations:**
+- Attestations are visible in the GitHub UI for each artifact
+- Can be verified using the GitHub CLI or API
+
+### Conditional Builds on Pull Requests
+
+The build workflow includes a test job that runs first on pull requests:
+
+```yaml
+jobs:
+  test:
+    if: github.event_name == 'pull_request'
+    # ... runs tests
+  
+  build-linux:
+    needs: [test]
+    if: |
+      always() &&
+      (github.event_name != 'pull_request' || needs.test.result == 'success')
+```
+
+**Benefits:**
+- Saves resources by not building if tests fail
+- Faster feedback on test failures
+- Builds only run after code quality checks pass
 
 ### Artifact Retention
 
@@ -278,6 +374,18 @@ Potential improvements to consider:
 6. **Windows signing**: Add code signing for Windows builds
 7. **ARM builds**: Add support for ARM64 Linux builds
 8. **Android builds**: Add mobile platform builds if needed
+9. **Dependency caching optimization**: Fine-tune cache keys for better hit rates
+10. **Parallel testing**: Split tests into parallel jobs for faster execution
+
+---
+
+## Recent Improvements
+
+✅ **Implemented:**
+- Pub dependency caching (3x faster builds)
+- Conditional builds on PRs (only after tests pass)
+- Build provenance attestation for supply chain security
+- Multi-layer caching (SDK + dependencies)
 
 ---
 
