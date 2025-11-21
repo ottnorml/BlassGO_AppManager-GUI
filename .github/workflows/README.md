@@ -71,18 +71,24 @@ This directory contains GitHub Actions workflows for automated testing, building
 
 **Purpose:** Automatically creates GitHub releases with pre-built binaries for all platforms
 
-**Strategy:** Uses GitHub Actions matrix strategy for efficient parallel builds
+**Strategy:** Reuses build workflow artifacts instead of rebuilding
 
 **Process:**
-1. Builds application for all three platforms (Linux, macOS, Windows) in parallel using matrix
-2. Generates build provenance attestation for each artifact
-3. Packages each build into appropriate archive formats
+1. Triggers the build workflow for the release tag
+2. Waits for the build workflow to complete successfully
+3. Downloads all build artifacts from the completed build workflow run
 4. Creates a GitHub release with the tag
 5. Uploads all platform binaries as release assets
 6. Generates release notes with installation instructions
 
+**Benefits:**
+- **No duplication**: Reuses existing build workflow logic
+- **Consistency**: Release binaries built exactly the same as regular builds
+- **Efficiency**: No need to maintain duplicate build code
+- **Attestation**: Inherits build provenance attestation from build workflow
+
 **Security:**
-- All release artifacts include cryptographic build attestation
+- All release artifacts include cryptographic build attestation (from build workflow)
 - Attestations provide verifiable proof of build provenance
 - Links artifacts to source code and build process
 
@@ -443,6 +449,7 @@ Potential improvements to consider:
 - Multi-layer caching (SDK + dependencies)
 - **Matrix strategy for parallel platform builds**
 - `fail-fast: false` to ensure all platforms build
+- **Release workflow reuses build workflow artifacts**
 
 ---
 

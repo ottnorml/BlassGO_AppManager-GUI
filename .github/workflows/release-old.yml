@@ -1,0 +1,277 @@
+# Release Workflow for Automated Multi-Platform Releases
+#
+# This workflow automatically creates GitHub releases with pre-built binaries
+# for all supported platforms when a new version tag is pushed.
+#
+# Trigger: Push of tags matching the pattern 'v*.*.*' (e.g., v1.2.5, v2.0.0)
+#
+# The workflow performs the following steps:
+# 1. Builds the application for Linux, macOS, and Windows using matrix strategy
+# 2. Generates build attestations for security
+# 3. Creates a GitHub release with the tag
+# 4. Uploads all platform binaries as release assets
+#
+# Usage:
+#   To create a new release, push a tag:
+#   git tag v1.2.6
+#   git push origin v1.2.6
+#
+# Note: For macOS releases with code signing, you would need to:
+# - Add APPLE_CERTIFICATE and APPLE_CERTIFICATE_PASSWORD secrets
+# - Add APPLE_TEAM_ID secret
+# - Update the macOS build configuration with code signing steps
+
+name: Release
+
+# Trigger on version tags (e.g., v1.2.5, v2.0.0)
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+# Define permissions for creating releases and uploading assets
+permissions:
+  contents: write
+  id-token: write  # Required for build attestation
+  attestations: write  # Required for build attestation
+
+jobs:
+  # Job 1: Build for all platforms using matrix strategy
+  build:
+    name: Build ${{ matrix.platform }} (${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    
+    strategy:
+      # Don't cancel other matrix jobs if one fails
+      fail-fast: false
+      matrix:
+        include:
+          # Linux build configuration
+          - platform: Linux
+            os: ubuntu-latest
+            arch: x64
+            build-command: flutter build linux --release
+            artifact-name: app_manager_linux_x64.tar.gz
+            package-command: |
+              cd build/linux/x64/release/bundle
+              tar -czf ../../../../../app_manager_linux_x64.tar.gz .
+            cache-path: |
+              ~/.pub-cache
+              .dart_tool
+            desktop-flag: linux
+          
+          # macOS build configuration
+          - platform: macOS
+            os: macos-latest
+            arch: Universal
+            build-command: flutter build macos --release
+            artifact-name: app_manager_macos.zip
+            package-command: |
+              cd build/macos/Build/Products/Release
+              zip -r ../../../../../app_manager_macos.zip app_manager.app
+            cache-path: |
+              ~/.pub-cache
+              .dart_tool
+            desktop-flag: macos
+          
+          # Windows build configuration
+          - platform: Windows
+            os: windows-latest
+            arch: x64
+            build-command: flutter build windows --release
+            artifact-name: app_manager_windows_x64.zip
+            package-command: |
+              cd build\windows\x64\runner\Release
+              Compress-Archive -Path * -DestinationPath ..\..\..\..\..\app_manager_windows_x64.zip
+            package-shell: pwsh
+            cache-path: |
+              ~\AppData\Local\Pub\Cache
+              .dart_tool
+            desktop-flag: windows
+    
+    steps:
+      # Step 1: Check out the repository
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      # Step 2: Install platform-specific dependencies (Linux only)
+      - name: Install Linux dependencies
+        if: matrix.platform == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang \
+            cmake \
+            ninja-build \
+            pkg-config \
+            libgtk-3-dev \
+            liblzma-dev \
+            libstdc++-12-dev
+      
+      # Step 3: Set up Flutter SDK with caching
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+      
+      # Step 4: Cache pub dependencies per platform
+      - name: Cache pub dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ matrix.cache-path }}
+          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-
+      
+      # Step 5: Enable desktop support for the platform
+      - name: Enable ${{ matrix.platform }} desktop
+        run: flutter config --enable-${{ matrix.desktop-flag }}-desktop
+      
+      # Step 6: Install project dependencies
+      - name: Install dependencies
+        run: flutter pub get
+      
+      # Optional: Code signing for macOS (requires secrets to be set)
+      # Uncomment and configure these steps when you have Apple Developer certificates
+      #
+      # - name: Import Apple Code Signing Certificate
+      #   if: matrix.platform == 'macOS'
+      #   env:
+      #     APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      #     APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      #   run: |
+      #     # Create variables
+      #     CERTIFICATE_PATH=$RUNNER_TEMP/build_certificate.p12
+      #     KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+      #     KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+      #     
+      #     # Import certificate from secrets
+      #     echo -n "$APPLE_CERTIFICATE" | base64 -d > $CERTIFICATE_PATH
+      #     
+      #     # Create temporary keychain
+      #     security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+      #     security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+      #     security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+      #     
+      #     # Import certificate to keychain
+      #     security import $CERTIFICATE_PATH -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+      #     security list-keychain -d user -s $KEYCHAIN_PATH
+      #     
+      #     # Clean up
+      #     rm $CERTIFICATE_PATH
+      
+      # Step 7: Build for the platform
+      - name: Build ${{ matrix.platform }} app
+        run: ${{ matrix.build-command }}
+      
+      # Step 8: Package the build
+      - name: Package ${{ matrix.platform }} build
+        run: ${{ matrix.package-command }}
+        shell: ${{ matrix.package-shell || 'bash' }}
+      
+      # Step 9: Generate build attestation for security
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: ${{ matrix.artifact-name }}
+      
+      # Step 10: Upload build artifact for release
+      - name: Upload ${{ matrix.platform }} artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform == 'Linux' && 'linux-release' || matrix.platform == 'macOS' && 'macos-release' || 'windows-release' }}
+          path: ${{ matrix.artifact-name }}
+          retention-days: 1
+  
+  # Job 2: Create GitHub Release
+  # This job runs after all builds complete and creates the release with all assets
+  create-release:
+    name: Create GitHub Release
+    needs: [build]
+    runs-on: ubuntu-latest
+    
+    steps:
+      # Step 1: Check out the repository (needed for release notes)
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      # Step 2: Download all build artifacts
+      - name: Download Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-release
+      
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-release
+      
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-release
+      
+      # Step 3: Create release notes
+      - name: Generate release notes
+        id: release-notes
+        run: |
+          # Extract version from tag (remove 'v' prefix)
+          VERSION=${GITHUB_REF#refs/tags/v}
+          
+          # Create release notes
+          cat > release-notes.md << EOF
+          # App Manager GUI v${VERSION}
+          
+          ## Downloads
+          
+          Choose the appropriate version for your operating system:
+          
+          - **Linux (x64)**: \`app_manager_linux_x64.tar.gz\`
+          - **macOS (Universal)**: \`app_manager_macos.zip\` (supports both Intel and Apple Silicon)
+          - **Windows (x64)**: \`app_manager_windows_x64.zip\`
+          
+          ## Installation Instructions
+          
+          ### Linux
+          1. Download \`app_manager_linux_x64.tar.gz\`
+          2. Extract: \`tar -xzf app_manager_linux_x64.tar.gz -C ~/AppManager\`
+          3. Run: \`cd ~/AppManager && ./app_manager\`
+          
+          ### macOS
+          1. Download \`app_manager_macos.zip\`
+          2. Extract the zip file
+          3. Move \`app_manager.app\` to your Applications folder
+          4. Right-click and select "Open" on first launch (required for unsigned apps)
+          
+          ### Windows
+          1. Download \`app_manager_windows_x64.zip\`
+          2. Extract to a folder (e.g., \`C:\AppManager\`)
+          3. Run \`app_manager.exe\`
+          
+          ## Requirements
+          
+          - [ADB (Android Debug Bridge)](https://developer.android.com/tools/releases/platform-tools)
+          - Android device with USB debugging enabled
+          
+          ## What's Changed
+          
+          See the full changelog below for details on this release.
+          EOF
+          
+          # Output the file content for the release
+          cat release-notes.md
+      
+      # Step 4: Create GitHub Release with all artifacts
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release-notes.md
+          files: |
+            app_manager_linux_x64.tar.gz
+            app_manager_macos.zip
+            app_manager_windows_x64.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
